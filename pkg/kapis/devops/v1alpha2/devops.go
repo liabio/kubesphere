@@ -20,19 +20,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
+
 	"github.com/emicklei/go-restful"
 	"k8s.io/apiserver/pkg/authentication/user"
 	log "k8s.io/klog"
+	"k8s.io/klog/v2"
 	"kubesphere.io/kubesphere/pkg/api"
 	"kubesphere.io/kubesphere/pkg/apis/devops/v1alpha3"
-	iamv1alpha2 "kubesphere.io/kubesphere/pkg/apis/iam/v1alpha2"
+	"kubesphere.io/kubesphere/pkg/apiserver/authorization/authorizer"
 	"kubesphere.io/kubesphere/pkg/apiserver/request"
 	"kubesphere.io/kubesphere/pkg/constants"
 	"kubesphere.io/kubesphere/pkg/models/devops"
+	"kubesphere.io/kubesphere/pkg/server/params"
 	clientDevOps "kubesphere.io/kubesphere/pkg/simple/client/devops"
-	"net/http"
-	"strconv"
-	"strings"
+	"kubesphere.io/kubesphere/pkg/simple/client/devops/jenkins"
 )
 
 const jenkinsHeaderPre = "X-"
@@ -54,32 +57,39 @@ func (h *ProjectPipelineHandler) GetPipeline(req *restful.Request, resp *restful
 func (h *ProjectPipelineHandler) getPipelinesByRequest(req *restful.Request) (api.ListResult, error) {
 	// this is a very trick way, but don't have a better solution for now
 	var (
-		err       error
-		start     int
-		limit     int
-		namespace string
+		start      int
+		limit      int
+		namespace  string
+		nameFilter string
 	)
 
 	// parse query from the request
 	query := req.QueryParameter("q")
 	for _, val := range strings.Split(query, ";") {
 		if strings.HasPrefix(val, "pipeline:") {
-			namespace = strings.TrimLeft(val, "pipeline:")
-			namespace = strings.Split(namespace, "/")[0]
+			nsAndName := strings.TrimLeft(val, "pipeline:")
+			filterMeta := strings.Split(nsAndName, "/")
+			if len(filterMeta) >= 2 {
+				namespace = filterMeta[0]
+				nameFilter = filterMeta[1] // the format is '*keyword*'
+				nameFilter = strings.TrimSuffix(nameFilter, "*")
+				nameFilter = strings.TrimPrefix(nameFilter, "*")
+			} else if len(filterMeta) > 0 {
+				namespace = filterMeta[0]
+			}
 		}
 	}
 
+	pipelineFilter := func(pipeline *v1alpha3.Pipeline) bool {
+		return strings.Contains(pipeline.Name, nameFilter)
+	}
+	if nameFilter == "" {
+		pipelineFilter = nil
+	}
+
 	// make sure we have an appropriate value
-	if start, err = strconv.Atoi(req.QueryParameter("start")); err != nil {
-		start = 0
-	}
-	if limit, err = strconv.Atoi(req.QueryParameter("limit")); err != nil {
-		limit = 10
-	}
-
-	defer req.Request.Form.Set("limit", "10000") // assume the pipelines no more than 10k
-
-	return h.devopsOperator.ListPipelineObj(namespace, func(list []*v1alpha3.Pipeline, i int, j int) bool {
+	limit, start = params.ParsePaging(req)
+	return h.devopsOperator.ListPipelineObj(namespace, pipelineFilter, func(list []*v1alpha3.Pipeline, i int, j int) bool {
 		return strings.Compare(strings.ToUpper(list[i].Name), strings.ToUpper(list[j].Name)) < 0
 	}, limit, start)
 }
@@ -94,31 +104,38 @@ func (h *ProjectPipelineHandler) ListPipelines(req *restful.Request, resp *restf
 	// get all pipelines which come from ks
 	pipelineList := &clientDevOps.PipelineList{
 		Total: objs.TotalItems,
-		Items: make([]clientDevOps.Pipeline, objs.TotalItems),
+		Items: make([]clientDevOps.Pipeline, len(objs.Items)),
 	}
-	pipelineMap := make(map[string]int, objs.TotalItems)
-	for i, item := range objs.Items {
-		if pipeline, ok := item.(v1alpha3.Pipeline); !ok {
+	pipelineMap := make(map[string]int, pipelineList.Total)
+	for i, _ := range objs.Items {
+		if pipeline, ok := objs.Items[i].(v1alpha3.Pipeline); !ok {
 			continue
 		} else {
-			pip := clientDevOps.Pipeline{
-				Name: pipeline.Name,
-			}
-
 			pipelineMap[pipeline.Name] = i
-			pipelineList.Items[i] = pip
+			pipelineList.Items[i] = clientDevOps.Pipeline{
+				Name:        pipeline.Name,
+				Annotations: pipeline.Annotations,
+			}
 		}
 	}
 
 	// get all pipelines which come from Jenkins
 	// fill out the rest fields
+	if query, err := jenkins.ParseJenkinsQuery(req.Request.URL.RawQuery); err == nil {
+		query.Set("limit", "10000")
+		query.Set("start", "0")
+		req.Request.URL.RawQuery = query.Encode()
+	}
 	res, err := h.devopsOperator.ListPipelines(req.Request)
 	if err != nil {
 		log.Error(err)
 	} else {
-		for _, item := range res.Items {
-			if index, ok := pipelineMap[item.Name]; ok {
-				pipelineList.Items[index] = item
+		for i, _ := range res.Items {
+			if index, ok := pipelineMap[res.Items[i].Name]; ok {
+				// keep annotations field of pipelineList
+				annotations := pipelineList.Items[index].Annotations
+				pipelineList.Items[index] = res.Items[i]
+				pipelineList.Items[index].Annotations = annotations
 			}
 		}
 	}
@@ -277,11 +294,54 @@ func (h *ProjectPipelineHandler) GetPipelineRunNodes(req *restful.Request, resp 
 	resp.WriteAsJson(res)
 }
 
-func (h *ProjectPipelineHandler) approvableCheck(nodes []clientDevOps.NodesDetail, req *restful.Request) {
-	currentUserName, roleName := h.getCurrentUser(req)
+// there're two situation here:
+// 1. the particular submitters exist
+// the users who are the owner of this Pipeline or the submitter of this Pipeline, or has the auth to create a DevOps project
+// 2. no particular submitters
+// only the owner of this Pipeline can approve or reject it
+func (h *ProjectPipelineHandler) approvableCheck(nodes []clientDevOps.NodesDetail, pipe pipelineParam) {
+	var userInfo user.Info
+	var ok bool
+	var isAdmin bool
 	// check if current user belong to the admin group, grant it if it's true
-	isAdmin := roleName == iamv1alpha2.PlatformAdmin
+	if userInfo, ok = request.UserFrom(pipe.Context); ok {
+		createAuth := authorizer.AttributesRecord{
+			User:            userInfo,
+			Verb:            authorizer.VerbDelete,
+			Workspace:       pipe.Workspace,
+			DevOps:          pipe.ProjectName,
+			Resource:        "devopsprojects",
+			ResourceRequest: true,
+			ResourceScope:   request.DevOpsScope,
+		}
 
+		if decision, _, err := h.authorizer.Authorize(createAuth); err == nil {
+			isAdmin = decision == authorizer.DecisionAllow
+		} else {
+			// this is an expected case, printing the debug info for troubleshooting
+			klog.V(8).Infof("authorize failed with '%v', error is '%v'",
+				createAuth, err)
+		}
+	} else {
+		klog.V(6).Infof("cannot get the current user when checking the approvable with pipeline '%s/%s'",
+			pipe.ProjectName, pipe.Name)
+		return
+	}
+
+	var createdByCurrentUser bool // indicate if the current user is the owner
+	if pipeline, err := h.devopsOperator.GetPipelineObj(pipe.ProjectName, pipe.Name); err == nil {
+		if creator, ok := pipeline.GetAnnotations()[constants.CreatorAnnotationKey]; ok {
+			createdByCurrentUser = userInfo.GetName() == creator
+		} else {
+			klog.V(6).Infof("annotation '%s' is necessary but it is missing from '%s/%s'",
+				constants.CreatorAnnotationKey, pipe.ProjectName, pipe.Name)
+		}
+	} else {
+		klog.V(6).Infof("cannot find pipeline '%s/%s', error is '%v'", pipe.ProjectName, pipe.Name, err)
+		return
+	}
+
+	// check every input steps if it's approvable
 	for i, node := range nodes {
 		if node.State != clientDevOps.StatePaused {
 			continue
@@ -292,7 +352,7 @@ func (h *ProjectPipelineHandler) approvableCheck(nodes []clientDevOps.NodesDetai
 				continue
 			}
 
-			nodes[i].Steps[j].Approvable = isAdmin || step.Input.Approvable(currentUserName)
+			nodes[i].Steps[j].Approvable = isAdmin || createdByCurrentUser || step.Input.Approvable(userInfo.GetName())
 		}
 	}
 }
@@ -308,33 +368,8 @@ func (h *ProjectPipelineHandler) createdBy(projectName string, pipelineName stri
 	return false
 }
 
-func (h *ProjectPipelineHandler) getCurrentUser(req *restful.Request) (username, roleName string) {
-	var userInfo user.Info
-	var ok bool
-	var err error
-
-	ctx := req.Request.Context()
-	if userInfo, ok = request.UserFrom(ctx); ok {
-		var role *iamv1alpha2.GlobalRole
-		username = userInfo.GetName()
-		if role, err = h.amInterface.GetGlobalRoleOfUser(username); err == nil {
-			roleName = role.Name
-		}
-	}
-	return
-}
-
 func (h *ProjectPipelineHandler) hasSubmitPermission(req *restful.Request) (hasPermit bool, err error) {
-	currentUserName, roleName := h.getCurrentUser(req)
-	projectName := req.PathParameter("devops")
-	pipelineName := req.PathParameter("pipeline")
-	// check if current user belong to the admin group or he's the owner, grant it if it's true
-	if roleName == iamv1alpha2.PlatformAdmin || h.createdBy(projectName, pipelineName, currentUserName) {
-		hasPermit = true
-		return
-	}
-
-	// step 2, check if current user if was addressed
+	pipeParam := parsePipelineParam(req)
 	httpReq := &http.Request{
 		URL:      req.Request.URL,
 		Header:   req.Request.Header,
@@ -345,10 +380,20 @@ func (h *ProjectPipelineHandler) hasSubmitPermission(req *restful.Request) (hasP
 	runId := req.PathParameter("run")
 	nodeId := req.PathParameter("node")
 	stepId := req.PathParameter("step")
+	branchName := req.PathParameter("branch")
 
 	// check if current user can approve this input
 	var res []clientDevOps.NodesDetail
-	if res, err = h.devopsOperator.GetNodesDetail(projectName, pipelineName, runId, httpReq); err == nil {
+
+	if branchName == "" {
+		res, err = h.devopsOperator.GetNodesDetail(pipeParam.ProjectName, pipeParam.Name, runId, httpReq)
+	} else {
+		res, err = h.devopsOperator.GetBranchNodesDetail(pipeParam.ProjectName, pipeParam.Name, branchName, runId, httpReq)
+	}
+
+	if err == nil {
+		h.approvableCheck(res, parsePipelineParam(req))
+
 		for _, node := range res {
 			if node.ID != nodeId {
 				continue
@@ -359,7 +404,7 @@ func (h *ProjectPipelineHandler) hasSubmitPermission(req *restful.Request) (hasP
 					continue
 				}
 
-				hasPermit = step.Input.Approvable(currentUserName)
+				hasPermit = step.Approvable
 				break
 			}
 			break
@@ -410,7 +455,7 @@ func (h *ProjectPipelineHandler) GetNodesDetail(req *restful.Request, resp *rest
 		parseErr(err, resp)
 		return
 	}
-	h.approvableCheck(res, req)
+	h.approvableCheck(res, parsePipelineParam(req))
 
 	resp.WriteAsJson(res)
 }
@@ -618,8 +663,17 @@ func (h *ProjectPipelineHandler) GetBranchNodesDetail(req *restful.Request, resp
 		parseErr(err, resp)
 		return
 	}
-	h.approvableCheck(res, req)
+	h.approvableCheck(res, parsePipelineParam(req))
 	resp.WriteAsJson(res)
+}
+
+func parsePipelineParam(req *restful.Request) pipelineParam {
+	return pipelineParam{
+		Workspace:   req.PathParameter("workspace"),
+		ProjectName: req.PathParameter("devops"),
+		Name:        req.PathParameter("pipeline"),
+		Context:     req.Request.Context(),
+	}
 }
 
 func (h *ProjectPipelineHandler) GetPipelineBranch(req *restful.Request, resp *restful.Response) {

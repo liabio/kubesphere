@@ -19,11 +19,11 @@ package virtualservice
 import (
 	"context"
 	"fmt"
-	"reflect"
-	"strings"
-
 	apinetworkingv1alpha3 "istio.io/api/networking/v1alpha3"
 	clientgonetworkingv1alpha3 "istio.io/client-go/pkg/apis/networking/v1alpha3"
+	istioclient "istio.io/client-go/pkg/clientset/versioned"
+	istioinformers "istio.io/client-go/pkg/informers/externalversions/networking/v1alpha3"
+	istiolisters "istio.io/client-go/pkg/listers/networking/v1alpha3"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,24 +32,21 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes/scheme"
-	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
-	log "k8s.io/klog"
-	"kubesphere.io/kubesphere/pkg/controller/virtualservice/util"
-
-	istioclient "istio.io/client-go/pkg/clientset/versioned"
-	istioinformers "istio.io/client-go/pkg/informers/externalversions/networking/v1alpha3"
-	istiolisters "istio.io/client-go/pkg/listers/networking/v1alpha3"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
+	log "k8s.io/klog"
 	servicemeshv1alpha2 "kubesphere.io/kubesphere/pkg/apis/servicemesh/v1alpha2"
 	servicemeshclient "kubesphere.io/kubesphere/pkg/client/clientset/versioned"
 	servicemeshinformers "kubesphere.io/kubesphere/pkg/client/informers/externalversions/servicemesh/v1alpha2"
 	servicemeshlisters "kubesphere.io/kubesphere/pkg/client/listers/servicemesh/v1alpha2"
+	"kubesphere.io/kubesphere/pkg/controller/utils/servicemesh"
+	"reflect"
 
 	"time"
 )
@@ -256,9 +253,9 @@ func (v *VirtualServiceController) syncService(key string) error {
 		return err
 	}
 
-	if len(service.Labels) < len(util.ApplicationLabels) ||
-		!util.IsApplicationComponent(service.Labels) ||
-		!util.IsServicemeshEnabled(service.Annotations) ||
+	if len(service.Labels) < len(servicemesh.ApplicationLabels) ||
+		!servicemesh.IsApplicationComponent(service.Labels) ||
+		!servicemesh.IsServicemeshEnabled(service.Annotations) ||
 		len(service.Spec.Ports) == 0 {
 		// services don't have enough labels to create a virtualservice
 		// or they don't have necessary labels
@@ -266,7 +263,7 @@ func (v *VirtualServiceController) syncService(key string) error {
 		return nil
 	}
 	// get real component name, i.e label app value
-	appName = util.GetComponentName(&service.ObjectMeta)
+	appName = servicemesh.GetComponentName(&service.ObjectMeta)
 
 	destinationRule, err := v.destinationRuleLister.DestinationRules(namespace).Get(name)
 	if err != nil {
@@ -287,7 +284,7 @@ func (v *VirtualServiceController) syncService(key string) error {
 	}
 
 	// fetch all strategies applied to service
-	strategies, err := v.strategyLister.Strategies(namespace).List(labels.SelectorFromSet(map[string]string{util.AppLabel: appName}))
+	strategies, err := v.strategyLister.Strategies(namespace).List(labels.SelectorFromSet(map[string]string{servicemesh.AppLabel: appName}))
 	if err != nil {
 		log.Error(err, "list strategies for service failed", "namespace", namespace, "name", appName)
 		return err
@@ -306,7 +303,7 @@ func (v *VirtualServiceController) syncService(key string) error {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      appName,
 					Namespace: namespace,
-					Labels:    util.ExtractApplicationLabels(&service.ObjectMeta),
+					Labels:    servicemesh.ExtractApplicationLabels(&service.ObjectMeta),
 				},
 			}
 		} else {
@@ -321,9 +318,13 @@ func (v *VirtualServiceController) syncService(key string) error {
 	// TODO(jeff): use FQDN to replace service name
 	vs.Spec.Hosts = []string{name}
 
+	vs.Spec.Http = []*apinetworkingv1alpha3.HTTPRoute{}
+	vs.Spec.Tcp = []*apinetworkingv1alpha3.TCPRoute{}
+
 	// check if service has TCP protocol ports
 	for _, port := range service.Spec.Ports {
 		var route apinetworkingv1alpha3.HTTPRouteDestination
+		var match apinetworkingv1alpha3.HTTPMatchRequest
 		if port.Protocol == v1.ProtocolTCP {
 			route = apinetworkingv1alpha3.HTTPRouteDestination{
 				Destination: &apinetworkingv1alpha3.Destination{
@@ -336,22 +337,29 @@ func (v *VirtualServiceController) syncService(key string) error {
 				Weight: 100,
 			}
 
-			// a http port, add to HTTPRoute
-			if len(port.Name) > 0 && (port.Name == "http" || strings.HasPrefix(port.Name, "http-")) {
-				vs.Spec.Http = []*apinetworkingv1alpha3.HTTPRoute{{Route: []*apinetworkingv1alpha3.HTTPRouteDestination{&route}}}
-				break
-			}
+			match = apinetworkingv1alpha3.HTTPMatchRequest{Port: uint32(port.Port)}
 
-			// everything else treated as TCPRoute
-			tcpRoute := apinetworkingv1alpha3.TCPRoute{
-				Route: []*apinetworkingv1alpha3.RouteDestination{
-					{
-						Destination: route.Destination,
-						Weight:      route.Weight,
+			// a http port, add to HTTPRoute
+
+			if servicemesh.SupportHttpProtocol(port.Name) {
+				httpRoute := apinetworkingv1alpha3.HTTPRoute{
+					Route: []*apinetworkingv1alpha3.HTTPRouteDestination{&route},
+					Match: []*apinetworkingv1alpha3.HTTPMatchRequest{&match},
+				}
+				vs.Spec.Http = append(vs.Spec.Http, &httpRoute)
+			} else {
+				// everything else treated as TCPRoute
+				tcpRoute := apinetworkingv1alpha3.TCPRoute{
+					Route: []*apinetworkingv1alpha3.RouteDestination{
+						{
+							Destination: route.Destination,
+							Weight:      route.Weight,
+						},
 					},
-				},
+					Match: []*apinetworkingv1alpha3.L4MatchAttributes{{Port: match.Port}},
+				}
+				vs.Spec.Tcp = append(vs.Spec.Tcp, &tcpRoute)
 			}
-			vs.Spec.Tcp = []*apinetworkingv1alpha3.TCPRoute{&tcpRoute}
 		}
 	}
 
@@ -386,7 +394,6 @@ func (v *VirtualServiceController) syncService(key string) error {
 		default:
 			vs.Spec = v.generateVirtualServiceSpec(strategies[0], service).Spec
 		}
-
 	}
 
 	createVirtualService := len(currentVirtualService.ResourceVersion) == 0
@@ -457,7 +464,7 @@ func (v *VirtualServiceController) addDestinationRule(obj interface{}) {
 func (v *VirtualServiceController) addStrategy(obj interface{}) {
 	strategy := obj.(*servicemeshv1alpha2.Strategy)
 
-	lbs := util.ExtractApplicationLabels(&strategy.ObjectMeta)
+	lbs := servicemesh.ExtractApplicationLabels(&strategy.ObjectMeta)
 	if len(lbs) == 0 {
 		err := fmt.Errorf("invalid strategy %s/%s labels %s, not have required labels", strategy.Namespace, strategy.Name, strategy.Labels)
 		log.Error(err, "")
@@ -543,8 +550,40 @@ func (v *VirtualServiceController) getSubsets(strategy *servicemeshv1alpha2.Stra
 func (v *VirtualServiceController) generateVirtualServiceSpec(strategy *servicemeshv1alpha2.Strategy, service *v1.Service) *clientgonetworkingv1alpha3.VirtualService {
 
 	// Define VirtualService to be created
-	vs := &clientgonetworkingv1alpha3.VirtualService{
-		Spec: strategy.Spec.Template.Spec,
+	vs := &clientgonetworkingv1alpha3.VirtualService{}
+	vs.Spec.Hosts = strategy.Spec.Template.Spec.Hosts
+
+	// For multi-ports, apply the rules to each port matched http/tcp protocol
+	for _, port := range service.Spec.Ports {
+		s := strategy.DeepCopy()
+		strategyTempSpec := s.Spec.Template.Spec
+		// fill route.destination.port and match.port filed
+		if len(strategyTempSpec.Http) > 0 && servicemesh.SupportHttpProtocol(port.Name) {
+			for _, http := range strategyTempSpec.Http {
+				if len(http.Match) == 0 {
+					http.Match = []*apinetworkingv1alpha3.HTTPMatchRequest{{Port: uint32(port.Port)}}
+				} else {
+					for _, match := range http.Match {
+						match.Port = uint32(port.Port)
+					}
+				}
+				for _, route := range http.Route {
+					route.Destination.Port = &apinetworkingv1alpha3.PortSelector{
+						Number: uint32(port.Port),
+					}
+				}
+			}
+			vs.Spec.Http = append(vs.Spec.Http, strategyTempSpec.Http...)
+		}
+		if len(strategyTempSpec.Tcp) > 0 && !servicemesh.SupportHttpProtocol(port.Name) {
+			for _, tcp := range strategyTempSpec.Tcp {
+				tcp.Match = []*apinetworkingv1alpha3.L4MatchAttributes{{Port: uint32(port.Port)}}
+				for _, r := range tcp.Route {
+					r.Destination.Port = &apinetworkingv1alpha3.PortSelector{Number: uint32(port.Port)}
+				}
+			}
+			vs.Spec.Tcp = append(vs.Spec.Tcp, strategyTempSpec.Tcp...)
+		}
 	}
 
 	// one version rules them all
@@ -557,31 +596,36 @@ func (v *VirtualServiceController) generateVirtualServiceSpec(strategy *servicem
 			Weight: 100,
 		}
 
-		if len(strategy.Spec.Template.Spec.Http) > 0 {
-			governorRoute := apinetworkingv1alpha3.HTTPRoute{
-				Route: []*apinetworkingv1alpha3.HTTPRouteDestination{&governorDestinationWeight},
-			}
+		for _, port := range service.Spec.Ports {
+			match := apinetworkingv1alpha3.HTTPMatchRequest{Port: uint32(port.Port)}
+			if len(strategy.Spec.Template.Spec.Http) > 0 {
+				governorRoute := apinetworkingv1alpha3.HTTPRoute{
+					Route: []*apinetworkingv1alpha3.HTTPRouteDestination{&governorDestinationWeight},
+					Match: []*apinetworkingv1alpha3.HTTPMatchRequest{&match},
+				}
+				vs.Spec.Http = []*apinetworkingv1alpha3.HTTPRoute{&governorRoute}
 
-			vs.Spec.Http = []*apinetworkingv1alpha3.HTTPRoute{&governorRoute}
-		} else if len(strategy.Spec.Template.Spec.Tcp) > 0 {
-			tcpRoute := apinetworkingv1alpha3.TCPRoute{
-				Route: []*apinetworkingv1alpha3.RouteDestination{
-					{
-						Destination: &apinetworkingv1alpha3.Destination{
-							Host:   governorDestinationWeight.Destination.Host,
-							Subset: governorDestinationWeight.Destination.Subset,
+			}
+			if len(strategy.Spec.Template.Spec.Tcp) > 0 {
+				tcpRoute := apinetworkingv1alpha3.TCPRoute{
+					Route: []*apinetworkingv1alpha3.RouteDestination{
+						{
+							Destination: &apinetworkingv1alpha3.Destination{
+								Host:   governorDestinationWeight.Destination.Host,
+								Subset: governorDestinationWeight.Destination.Subset,
+							},
+							Weight: governorDestinationWeight.Weight,
 						},
-						Weight: governorDestinationWeight.Weight,
 					},
-				},
+					Match: []*apinetworkingv1alpha3.L4MatchAttributes{{Port: match.Port}},
+				}
+
+				//governorRoute := v1alpha3.TCPRoute{tcpRoute}
+				vs.Spec.Tcp = []*apinetworkingv1alpha3.TCPRoute{&tcpRoute}
 			}
-
-			//governorRoute := v1alpha3.TCPRoute{tcpRoute}
-			vs.Spec.Tcp = []*apinetworkingv1alpha3.TCPRoute{&tcpRoute}
 		}
-
 	}
 
-	util.FillDestinationPort(vs, service)
+	servicemesh.FillDestinationPort(vs, service)
 	return vs
 }

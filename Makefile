@@ -44,6 +44,10 @@ ks-apiserver: fmt vet
 ks-controller-manager: fmt vet
 	hack/gobuild.sh cmd/controller-manager
 
+# Build e2e binary
+e2e: fmt vet
+	hack/build_e2e.sh test/e2e
+
 # Run go fmt against code 
 fmt:
 	gofmt -w ./pkg ./cmd ./tools ./api
@@ -84,7 +88,7 @@ docker-build-no-test: ks-apiserver ks-controller-manager
 
 # Run tests
 test: fmt vet
-	export KUBEBUILDER_CONTROLPLANE_START_TIMEOUT=1m; go test ./pkg/... ./cmd/... -covermode=atomic -coverprofile=coverage.txt
+	export KUBEBUILDER_CONTROLPLANE_START_TIMEOUT=2m; go test ./pkg/... ./cmd/... -covermode=atomic -coverprofile=coverage.txt
 
 .PHONY: clean
 clean:

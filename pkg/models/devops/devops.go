@@ -43,6 +43,7 @@ import (
 	"kubesphere.io/kubesphere/pkg/simple/client/devops"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -61,7 +62,7 @@ type DevopsOperator interface {
 	GetPipelineObj(projectName string, pipelineName string) (*v1alpha3.Pipeline, error)
 	DeletePipelineObj(projectName string, pipelineName string) error
 	UpdatePipelineObj(projectName string, pipeline *v1alpha3.Pipeline) (*v1alpha3.Pipeline, error)
-	ListPipelineObj(projectName string, sortFunc func([]*v1alpha3.Pipeline, int, int) bool, limit, offset int) (api.ListResult, error)
+	ListPipelineObj(projectName string, filterFunc func(*v1alpha3.Pipeline) bool, sortFunc func([]*v1alpha3.Pipeline, int, int) bool, limit, offset int) (api.ListResult, error)
 
 	CreateCredentialObj(projectName string, s *v1.Secret) (*v1.Secret, error)
 	GetCredentialObj(projectName string, secretName string) (*v1.Secret, error)
@@ -251,12 +252,22 @@ func (d devopsOperator) UpdatePipelineObj(projectName string, pipeline *v1alpha3
 	if err != nil {
 		return nil, err
 	}
-	projectObj.Annotations[devopsv1alpha3.PipelineSyncStatusAnnoKey] = StatusPending
-	projectObj.Annotations[devopsv1alpha3.PipelineSyncTimeAnnoKey] = GetSyncNowTime()
-	return d.ksclient.DevopsV1alpha3().Pipelines(projectObj.Status.AdminNamespace).Update(context.Background(), pipeline, metav1.UpdateOptions{})
+
+	ctx := context.Background()
+	ns := projectObj.Status.AdminNamespace
+	name := pipeline.GetName()
+	// trying to avoid the error of `Operation cannot be fulfilled on` by getting the latest resourceVersion
+	if latestPipe, err := d.ksclient.DevopsV1alpha3().Pipelines(ns).Get(ctx, name, metav1.GetOptions{}); err == nil {
+		pipeline.ResourceVersion = latestPipe.ResourceVersion
+	} else {
+		return nil, fmt.Errorf("cannot found pipeline %s/%s, error: %v", ns, name, err)
+	}
+
+	return d.ksclient.DevopsV1alpha3().Pipelines(ns).Update(context.Background(), pipeline, metav1.UpdateOptions{})
 }
 
-func (d devopsOperator) ListPipelineObj(projectName string, sortFunc func([]*v1alpha3.Pipeline, int, int) bool, limit, offset int) (api.ListResult, error) {
+func (d devopsOperator) ListPipelineObj(projectName string, filterFunc func(pipeline *v1alpha3.Pipeline) bool,
+	sortFunc func([]*v1alpha3.Pipeline, int, int) bool, limit, offset int) (api.ListResult, error) {
 	projectObj, err := d.ksInformers.Devops().V1alpha3().DevOpsProjects().Lister().Get(projectName)
 	if err != nil {
 		return api.ListResult{}, err
@@ -266,26 +277,25 @@ func (d devopsOperator) ListPipelineObj(projectName string, sortFunc func([]*v1a
 		return api.ListResult{}, err
 	}
 
-	// sort the pipeline list according to the request
 	if sortFunc != nil {
+		//sort the pipeline list according to the request
 		sort.SliceStable(data, func(i, j int) bool {
 			return sortFunc(data, i, j)
 		})
 	}
 
-	items := make([]interface{}, 0)
 	var result []interface{}
-	for _, item := range data {
-		result = append(result, *item)
+	for i, _ := range data {
+		if filterFunc != nil && !filterFunc(data[i]) {
+			continue
+		}
+		result = append(result, *data[i])
 	}
 
 	if limit == -1 || limit+offset > len(result) {
 		limit = len(result) - offset
 	}
-	items = result[offset : offset+limit]
-	if items == nil {
-		items = []interface{}{}
-	}
+	items := result[offset : offset+limit]
 	return api.ListResult{TotalItems: len(result), Items: items}, nil
 }
 
@@ -817,6 +827,7 @@ func (d devopsOperator) GetOrgRepo(scmId, organizationId string, req *http.Reque
 	return res, err
 }
 
+// CreateSCMServers creates a Bitbucket server config item in Jenkins configuration if there's no same API address exist
 func (d devopsOperator) CreateSCMServers(scmId string, req *http.Request) (*devops.SCMServer, error) {
 
 	requestBody, err := ioutil.ReadAll(req.Body)
@@ -837,8 +848,9 @@ func (d devopsOperator) CreateSCMServers(scmId string, req *http.Request) (*devo
 		return nil, err
 	}
 
+	createReq.ApiURL = strings.TrimSuffix(createReq.ApiURL, "/")
 	for _, server := range servers {
-		if server.ApiURL == createReq.ApiURL {
+		if strings.TrimSuffix(server.ApiURL, "/") == createReq.ApiURL {
 			return &server, nil
 		}
 	}

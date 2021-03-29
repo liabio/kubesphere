@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha2
 
 import (
+	"context"
 	"fmt"
 	"github.com/emicklei/go-restful"
 	"github.com/emicklei/go-restful-openapi"
@@ -24,18 +25,17 @@ import (
 	"k8s.io/apimachinery/pkg/util/proxy"
 	"k8s.io/klog"
 	devopsv1alpha1 "kubesphere.io/kubesphere/pkg/apis/devops/v1alpha1"
+	"kubesphere.io/kubesphere/pkg/apiserver/authorization/authorizer"
 	"kubesphere.io/kubesphere/pkg/apiserver/runtime"
 	"kubesphere.io/kubesphere/pkg/client/clientset/versioned"
 	"kubesphere.io/kubesphere/pkg/client/informers/externalversions"
 	"kubesphere.io/kubesphere/pkg/constants"
-	"kubesphere.io/kubesphere/pkg/models/iam/am"
 	"kubesphere.io/kubesphere/pkg/simple/client/devops/jenkins"
 	"kubesphere.io/kubesphere/pkg/simple/client/s3"
 	"kubesphere.io/kubesphere/pkg/simple/client/sonarqube"
 	"net/url"
 	"strings"
 
-	//"kubesphere.io/kubesphere/pkg/models/devops"
 	"kubesphere.io/kubesphere/pkg/simple/client/devops"
 	"net/http"
 )
@@ -47,10 +47,12 @@ const (
 
 var GroupVersion = schema.GroupVersion{Group: GroupName, Version: "v1alpha2"}
 
-func AddToContainer(container *restful.Container, ksInformers externalversions.SharedInformerFactory, devopsClient devops.Interface, sonarqubeClient sonarqube.SonarInterface, ksClient versioned.Interface, s3Client s3.Interface, endpoint string, amInterface am.AccessManagementInterface) error {
+func AddToContainer(container *restful.Container, ksInformers externalversions.SharedInformerFactory, devopsClient devops.Interface,
+	sonarqubeClient sonarqube.SonarInterface, ksClient versioned.Interface, s3Client s3.Interface, endpoint string,
+	authorizer authorizer.Authorizer) error {
 	ws := runtime.NewWebService(GroupVersion)
 
-	err := AddPipelineToWebService(ws, devopsClient, ksInformers, amInterface)
+	err := AddPipelineToWebService(ws, devopsClient, ksInformers, authorizer)
 	if err != nil {
 		return err
 	}
@@ -75,12 +77,13 @@ func AddToContainer(container *restful.Container, ksInformers externalversions.S
 	return nil
 }
 
-func AddPipelineToWebService(webservice *restful.WebService, devopsClient devops.Interface, ksInformers externalversions.SharedInformerFactory, amInterface am.AccessManagementInterface) error {
+func AddPipelineToWebService(webservice *restful.WebService, devopsClient devops.Interface, ksInformers externalversions.SharedInformerFactory,
+	authorizer authorizer.Authorizer) error {
 
 	projectPipelineEnable := devopsClient != nil
 
 	if projectPipelineEnable {
-		projectPipelineHandler := NewProjectPipelineHandler(devopsClient, ksInformers, amInterface)
+		projectPipelineHandler := NewProjectPipelineHandler(devopsClient, ksInformers, authorizer)
 
 		webservice.Route(webservice.GET("/devops/{devops}/credentials/{credential}/usage").
 			To(projectPipelineHandler.GetProjectCredentialUsage).
@@ -539,7 +542,7 @@ func AddPipelineToWebService(webservice *restful.WebService, devopsClient devops
 		webservice.Route(webservice.POST("/scms/{scm}/servers").
 			To(projectPipelineHandler.CreateSCMServers).
 			Metadata(restfulspec.KeyOpenAPITags, []string{constants.DevOpsScmTag}).
-			Doc("Create scm server in the jenkins.").
+			Doc("Create scm server if it does not exist in the Jenkins.").
 			Param(webservice.PathParameter("scm", "The ID of the source configuration management (SCM).")).
 			Reads(devops.CreateScmServerReq{}).
 			Returns(http.StatusOK, RespOK, devops.SCMServer{}).
@@ -704,23 +707,40 @@ func AddJenkinsToContainer(webservice *restful.WebService, devopsClient devops.I
 		}).
 		Returns(http.StatusOK, RespOK, nil).
 		Metadata(restfulspec.KeyOpenAPITags, []string{constants.DevOpsJenkinsTag}))
+
+	handlerWithDevOps := func(request *restful.Request, response *restful.Response) {
+		u := request.Request.URL
+		devops := request.PathParameter("devops")
+		u.Host = parse.Host
+		u.Scheme = parse.Scheme
+		jenkins.SetBasicBearTokenHeader(&request.Request.Header)
+		u.Path = strings.Replace(request.Request.URL.Path, fmt.Sprintf("/kapis/%s/%s/devops/%s/jenkins",
+			GroupVersion.Group, GroupVersion.Version, devops), "", 1)
+		httpProxy := proxy.NewUpgradeAwareHandler(u, http.DefaultTransport, false, false, &errorResponder{})
+		httpProxy.ServeHTTP(response, request.Request)
+	}
+	// some Jenkins API against with POST method
 	webservice.Route(webservice.GET("/devops/{devops}/jenkins/{path:*}").
 		Param(webservice.PathParameter("path", "Path stands for any suffix path.")).
 		Param(webservice.PathParameter("devops", "DevOps project's ID, e.g. project-RRRRAzLBlLEm")).
-		To(func(request *restful.Request, response *restful.Response) {
-			u := request.Request.URL
-			devops := request.PathParameter("devops")
-			u.Host = parse.Host
-			u.Scheme = parse.Scheme
-			jenkins.SetBasicBearTokenHeader(&request.Request.Header)
-			u.Path = strings.Replace(request.Request.URL.Path, fmt.Sprintf("/kapis/%s/%s/devops/%s/jenkins",
-				GroupVersion.Group, GroupVersion.Version, devops), "", 1)
-			httpProxy := proxy.NewUpgradeAwareHandler(u, http.DefaultTransport, false, false, &errorResponder{})
-			httpProxy.ServeHTTP(response, request.Request)
-		}).
+		To(handlerWithDevOps).
+		Returns(http.StatusOK, RespOK, nil).
+		Metadata(restfulspec.KeyOpenAPITags, []string{constants.DevOpsJenkinsTag}))
+	webservice.Route(webservice.POST("/devops/{devops}/jenkins/{path:*}").
+		Param(webservice.PathParameter("path", "Path stands for any suffix path.")).
+		Param(webservice.PathParameter("devops", "DevOps project's ID, e.g. project-RRRRAzLBlLEm")).
+		To(handlerWithDevOps).
 		Returns(http.StatusOK, RespOK, nil).
 		Metadata(restfulspec.KeyOpenAPITags, []string{constants.DevOpsJenkinsTag}))
 	return nil
+}
+
+type pipelineParam struct {
+	Workspace   string
+	ProjectName string
+	Name        string
+
+	Context context.Context
 }
 
 type errorResponder struct{}

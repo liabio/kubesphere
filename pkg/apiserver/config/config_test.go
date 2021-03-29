@@ -26,13 +26,14 @@ import (
 	authoptions "kubesphere.io/kubesphere/pkg/apiserver/authentication/options"
 	authorizationoptions "kubesphere.io/kubesphere/pkg/apiserver/authorization/options"
 	"kubesphere.io/kubesphere/pkg/simple/client/alerting"
-	auditingclient "kubesphere.io/kubesphere/pkg/simple/client/auditing/elasticsearch"
+	"kubesphere.io/kubesphere/pkg/simple/client/auditing"
 	"kubesphere.io/kubesphere/pkg/simple/client/cache"
 	"kubesphere.io/kubesphere/pkg/simple/client/devops/jenkins"
-	eventsclient "kubesphere.io/kubesphere/pkg/simple/client/events/elasticsearch"
+	"kubesphere.io/kubesphere/pkg/simple/client/events"
 	"kubesphere.io/kubesphere/pkg/simple/client/k8s"
+	"kubesphere.io/kubesphere/pkg/simple/client/kubeedge"
 	"kubesphere.io/kubesphere/pkg/simple/client/ldap"
-	"kubesphere.io/kubesphere/pkg/simple/client/logging/elasticsearch"
+	"kubesphere.io/kubesphere/pkg/simple/client/logging"
 	"kubesphere.io/kubesphere/pkg/simple/client/monitoring/prometheus"
 	"kubesphere.io/kubesphere/pkg/simple/client/multicluster"
 	"kubesphere.io/kubesphere/pkg/simple/client/network"
@@ -94,12 +95,16 @@ func newTestConfig() (*Config, error) {
 			Bucket:          "ssss",
 		},
 		OpenPitrixOptions: &openpitrix.Options{
-			RuntimeManagerEndpoint:    "openpitrix-hyperpitrix.openpitrix-system.svc:9103",
-			ClusterManagerEndpoint:    "openpitrix-hyperpitrix.openpitrix-system.svc:9104",
-			RepoManagerEndpoint:       "openpitrix-hyperpitrix.openpitrix-system.svc:9101",
-			AppManagerEndpoint:        "openpitrix-hyperpitrix.openpitrix-system.svc:9102",
-			CategoryManagerEndpoint:   "openpitrix-hyperpitrix.openpitrix-system.svc:9113",
-			AttachmentManagerEndpoint: "openpitrix-hyperpitrix.openpitrix-system.svc:9122",
+			S3Options: &s3.Options{
+				Endpoint:        "http://minio.openpitrix-system.svc",
+				Region:          "",
+				DisableSSL:      false,
+				ForcePathStyle:  false,
+				AccessKeyID:     "ABCDEFGHIJKLMN",
+				SecretAccessKey: "OPQRSTUVWXYZ",
+				SessionToken:    "abcdefghijklmn",
+				Bucket:          "app",
+			},
 		},
 		NetworkOptions: &network.Options{
 			EnableNetworkPolicy: true,
@@ -112,13 +117,17 @@ func newTestConfig() (*Config, error) {
 		MonitoringOptions: &prometheus.Options{
 			Endpoint: "http://prometheus.kubesphere-monitoring-system.svc",
 		},
-		LoggingOptions: &elasticsearch.Options{
+		LoggingOptions: &logging.Options{
 			Host:        "http://elasticsearch-logging.kubesphere-logging-system.svc:9200",
 			IndexPrefix: "elk",
 			Version:     "6",
 		},
 		AlertingOptions: &alerting.Options{
 			Endpoint: "http://alerting-client-server.kubesphere-alerting-system.svc:9200/api",
+
+			PrometheusEndpoint:       "http://prometheus-operated.kubesphere-monitoring-system.svc",
+			ThanosRulerEndpoint:      "http://thanos-ruler-operated.kubesphere-monitoring-system.svc",
+			ThanosRuleResourceLabels: "thanosruler=thanos-ruler,role=thanos-alerting-rules",
 		},
 		NotificationOptions: &notification.Options{
 			Endpoint: "http://notification.kubesphere-alerting-system.svc:9200",
@@ -146,15 +155,18 @@ func newTestConfig() (*Config, error) {
 		MultiClusterOptions: &multicluster.Options{
 			Enable: false,
 		},
-		EventsOptions: &eventsclient.Options{
+		EventsOptions: &events.Options{
 			Host:        "http://elasticsearch-logging-data.kubesphere-logging-system.svc:9200",
 			IndexPrefix: "ks-logstash-events",
 			Version:     "6",
 		},
-		AuditingOptions: &auditingclient.Options{
+		AuditingOptions: &auditing.Options{
 			Host:        "http://elasticsearch-logging-data.kubesphere-logging-system.svc:9200",
 			IndexPrefix: "ks-logstash-auditing",
 			Version:     "6",
+		},
+		KubeEdgeOptions: &kubeedge.Options{
+			Endpoint: "http://edge-watcher.kubeedge.svc/api/",
 		},
 	}
 	return conf, nil

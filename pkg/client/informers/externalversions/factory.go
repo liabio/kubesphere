@@ -28,12 +28,15 @@ import (
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	cache "k8s.io/client-go/tools/cache"
 	versioned "kubesphere.io/kubesphere/pkg/client/clientset/versioned"
+	application "kubesphere.io/kubesphere/pkg/client/informers/externalversions/application"
 	auditing "kubesphere.io/kubesphere/pkg/client/informers/externalversions/auditing"
 	cluster "kubesphere.io/kubesphere/pkg/client/informers/externalversions/cluster"
 	devops "kubesphere.io/kubesphere/pkg/client/informers/externalversions/devops"
 	iam "kubesphere.io/kubesphere/pkg/client/informers/externalversions/iam"
 	internalinterfaces "kubesphere.io/kubesphere/pkg/client/informers/externalversions/internalinterfaces"
 	network "kubesphere.io/kubesphere/pkg/client/informers/externalversions/network"
+	notification "kubesphere.io/kubesphere/pkg/client/informers/externalversions/notification"
+	quota "kubesphere.io/kubesphere/pkg/client/informers/externalversions/quota"
 	servicemesh "kubesphere.io/kubesphere/pkg/client/informers/externalversions/servicemesh"
 	storage "kubesphere.io/kubesphere/pkg/client/informers/externalversions/storage"
 	tenant "kubesphere.io/kubesphere/pkg/client/informers/externalversions/tenant"
@@ -180,15 +183,22 @@ type SharedInformerFactory interface {
 	ForResource(resource schema.GroupVersionResource) (GenericInformer, error)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
 
+	Application() application.Interface
 	Auditing() auditing.Interface
 	Cluster() cluster.Interface
 	Devops() devops.Interface
 	Iam() iam.Interface
 	Network() network.Interface
+	Notification() notification.Interface
+	Quota() quota.Interface
 	Servicemesh() servicemesh.Interface
 	Storage() storage.Interface
 	Tenant() tenant.Interface
 	Types() types.Interface
+}
+
+func (f *sharedInformerFactory) Application() application.Interface {
+	return application.New(f, f.namespace, f.tweakListOptions)
 }
 
 func (f *sharedInformerFactory) Auditing() auditing.Interface {
@@ -209,6 +219,14 @@ func (f *sharedInformerFactory) Iam() iam.Interface {
 
 func (f *sharedInformerFactory) Network() network.Interface {
 	return network.New(f, f.namespace, f.tweakListOptions)
+}
+
+func (f *sharedInformerFactory) Notification() notification.Interface {
+	return notification.New(f, f.namespace, f.tweakListOptions)
+}
+
+func (f *sharedInformerFactory) Quota() quota.Interface {
+	return quota.New(f, f.namespace, f.tweakListOptions)
 }
 
 func (f *sharedInformerFactory) Servicemesh() servicemesh.Interface {

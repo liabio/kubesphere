@@ -19,6 +19,7 @@ package v1alpha2
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/emicklei/go-restful"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -29,6 +30,7 @@ import (
 	auditingv1alpha1 "kubesphere.io/kubesphere/pkg/api/auditing/v1alpha1"
 	eventsv1alpha1 "kubesphere.io/kubesphere/pkg/api/events/v1alpha1"
 	loggingv1alpha2 "kubesphere.io/kubesphere/pkg/api/logging/v1alpha2"
+	quotav1alpha2 "kubesphere.io/kubesphere/pkg/apis/quota/v1alpha2"
 	tenantv1alpha2 "kubesphere.io/kubesphere/pkg/apis/tenant/v1alpha2"
 	"kubesphere.io/kubesphere/pkg/apiserver/authorization/authorizer"
 	"kubesphere.io/kubesphere/pkg/apiserver/query"
@@ -36,11 +38,13 @@ import (
 	kubesphere "kubesphere.io/kubesphere/pkg/client/clientset/versioned"
 	"kubesphere.io/kubesphere/pkg/informers"
 	"kubesphere.io/kubesphere/pkg/models/iam/am"
+	resourcev1alpha3 "kubesphere.io/kubesphere/pkg/models/resources/v1alpha3/resource"
 	"kubesphere.io/kubesphere/pkg/models/tenant"
 	servererr "kubesphere.io/kubesphere/pkg/server/errors"
 	"kubesphere.io/kubesphere/pkg/simple/client/auditing"
 	"kubesphere.io/kubesphere/pkg/simple/client/events"
 	"kubesphere.io/kubesphere/pkg/simple/client/logging"
+	monitoringclient "kubesphere.io/kubesphere/pkg/simple/client/monitoring"
 )
 
 type tenantHandler struct {
@@ -48,11 +52,13 @@ type tenantHandler struct {
 }
 
 func newTenantHandler(factory informers.InformerFactory, k8sclient kubernetes.Interface, ksclient kubesphere.Interface,
-	evtsClient events.Client, loggingClient logging.Interface, auditingclient auditing.Client,
-	am am.AccessManagementInterface, authorizer authorizer.Authorizer) *tenantHandler {
+	evtsClient events.Client, loggingClient logging.Client, auditingclient auditing.Client,
+	am am.AccessManagementInterface, authorizer authorizer.Authorizer,
+	monitoringclient monitoringclient.Interface,
+	resourceGetter *resourcev1alpha3.ResourceGetter) *tenantHandler {
 
 	return &tenantHandler{
-		tenant: tenant.New(factory, k8sclient, ksclient, evtsClient, loggingClient, auditingclient, am, authorizer),
+		tenant: tenant.New(factory, k8sclient, ksclient, evtsClient, loggingClient, auditingclient, am, authorizer, monitoringclient, resourceGetter),
 	}
 }
 
@@ -545,4 +551,79 @@ func (h *tenantHandler) ListClusters(r *restful.Request, response *restful.Respo
 	}
 
 	response.WriteEntity(result)
+}
+
+func (h *tenantHandler) CreateWorkspaceResourceQuota(r *restful.Request, response *restful.Response) {
+	workspaceName := r.PathParameter("workspace")
+	resourceQuota := &quotav1alpha2.ResourceQuota{}
+	err := r.ReadEntity(resourceQuota)
+	if err != nil {
+		api.HandleBadRequest(response, r, err)
+		return
+	}
+	result, err := h.tenant.CreateWorkspaceResourceQuota(workspaceName, resourceQuota)
+	if err != nil {
+		api.HandleInternalError(response, r, err)
+		return
+	}
+	response.WriteEntity(result)
+}
+
+func (h *tenantHandler) DeleteWorkspaceResourceQuota(r *restful.Request, response *restful.Response) {
+	workspace := r.PathParameter("workspace")
+	resourceQuota := r.PathParameter("resourcequota")
+
+	if err := h.tenant.DeleteWorkspaceResourceQuota(workspace, resourceQuota); err != nil {
+		if errors.IsNotFound(err) {
+			api.HandleNotFound(response, r, err)
+			return
+		}
+		api.HandleInternalError(response, r, err)
+		return
+	}
+
+	response.WriteEntity(servererr.None)
+}
+
+func (h *tenantHandler) UpdateWorkspaceResourceQuota(r *restful.Request, response *restful.Response) {
+	workspaceName := r.PathParameter("workspace")
+	resourceQuotaName := r.PathParameter("resourcequota")
+	resourceQuota := &quotav1alpha2.ResourceQuota{}
+	err := r.ReadEntity(resourceQuota)
+	if err != nil {
+		api.HandleBadRequest(response, r, err)
+		return
+	}
+
+	if resourceQuotaName != resourceQuota.Name {
+		err := fmt.Errorf("the name of the object (%s) does not match the name on the URL (%s)", resourceQuota.Name, resourceQuotaName)
+		klog.Errorf("%+v", err)
+		api.HandleBadRequest(response, r, err)
+		return
+	}
+
+	result, err := h.tenant.UpdateWorkspaceResourceQuota(workspaceName, resourceQuota)
+	if err != nil {
+		api.HandleInternalError(response, r, err)
+		return
+	}
+
+	response.WriteEntity(result)
+}
+
+func (h *tenantHandler) DescribeWorkspaceResourceQuota(r *restful.Request, response *restful.Response) {
+	workspaceName := r.PathParameter("workspace")
+	resourceQuotaName := r.PathParameter("resourcequota")
+
+	resourceQuota, err := h.tenant.DescribeWorkspaceResourceQuota(workspaceName, resourceQuotaName)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			api.HandleNotFound(response, r, err)
+			return
+		}
+		api.HandleInternalError(response, r, err)
+		return
+	}
+
+	response.WriteEntity(resourceQuota)
 }

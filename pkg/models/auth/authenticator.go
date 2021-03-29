@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"golang.org/x/crypto/bcrypt"
 	"kubesphere.io/kubesphere/pkg/apiserver/authentication/identityprovider"
+	informers "kubesphere.io/kubesphere/pkg/client/informers/externalversions"
 	"kubesphere.io/kubesphere/pkg/constants"
 	"net/mail"
 
@@ -46,7 +47,7 @@ type PasswordAuthenticator interface {
 	Authenticate(username, password string) (authuser.Info, string, error)
 }
 
-type OAuth2Authenticator interface {
+type OAuthAuthenticator interface {
 	Authenticate(provider, code string) (authuser.Info, string, error)
 }
 
@@ -77,12 +78,12 @@ func NewPasswordAuthenticator(ksClient kubesphere.Interface,
 	return passwordAuthenticator
 }
 
-func NewOAuth2Authenticator(ksClient kubesphere.Interface,
-	userLister iamv1alpha2listers.UserLister,
-	options *authoptions.AuthenticationOptions) OAuth2Authenticator {
+func NewOAuthAuthenticator(ksClient kubesphere.Interface,
+	ksInformer informers.SharedInformerFactory,
+	options *authoptions.AuthenticationOptions) OAuthAuthenticator {
 	oauth2Authenticator := &oauth2Authenticator{
 		ksClient:    ksClient,
-		userGetter:  &userGetter{userLister: userLister},
+		userGetter:  &userGetter{userLister: ksInformer.Iam().V1alpha2().Users().Lister()},
 		authOptions: options,
 	}
 	return oauth2Authenticator
@@ -99,7 +100,7 @@ func (p *passwordAuthenticator) Authenticate(username, password string) (authuse
 		if username == constants.AdminUserName {
 			break
 		}
-		if genericProvider, _ := identityprovider.CreateGenericProvider(providerOptions.Type, providerOptions.Provider); genericProvider != nil {
+		if genericProvider, _ := identityprovider.GetGenericProvider(providerOptions.Name); genericProvider != nil {
 			authenticated, err := genericProvider.Authenticate(username, password)
 			if err != nil {
 				if errors.IsUnauthorized(err) {
@@ -173,7 +174,6 @@ func preRegistrationUser(idp string, identity identityprovider.Identity) authuse
 			iamv1alpha2.ExtraUID:              {identity.GetUserID()},
 			iamv1alpha2.ExtraUsername:         {identity.GetUsername()},
 			iamv1alpha2.ExtraEmail:            {identity.GetEmail()},
-			iamv1alpha2.ExtraDisplayName:      {identity.GetDisplayName()},
 		},
 		Groups: []string{iamv1alpha2.PreRegistrationUserGroup},
 	}
@@ -186,7 +186,7 @@ func (o oauth2Authenticator) Authenticate(provider, code string) (authuser.Info,
 		klog.Error(err)
 		return nil, "", err
 	}
-	oauthIdentityProvider, err := identityprovider.CreateOAuthProvider(providerOptions.Type, providerOptions.Provider)
+	oauthIdentityProvider, err := identityprovider.GetOAuthProvider(providerOptions.Name)
 	if err != nil {
 		klog.Error(err)
 		return nil, "", err

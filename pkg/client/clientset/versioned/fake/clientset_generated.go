@@ -25,6 +25,8 @@ import (
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	"k8s.io/client-go/testing"
 	clientset "kubesphere.io/kubesphere/pkg/client/clientset/versioned"
+	applicationv1alpha1 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/application/v1alpha1"
+	fakeapplicationv1alpha1 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/application/v1alpha1/fake"
 	auditingv1alpha1 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/auditing/v1alpha1"
 	fakeauditingv1alpha1 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/auditing/v1alpha1/fake"
 	clusterv1alpha1 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/cluster/v1alpha1"
@@ -37,6 +39,10 @@ import (
 	fakeiamv1alpha2 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/iam/v1alpha2/fake"
 	networkv1alpha1 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/network/v1alpha1"
 	fakenetworkv1alpha1 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/network/v1alpha1/fake"
+	notificationv2beta1 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/notification/v2beta1"
+	fakenotificationv2beta1 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/notification/v2beta1/fake"
+	quotav1alpha2 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/quota/v1alpha2"
+	fakequotav1alpha2 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/quota/v1alpha2/fake"
 	servicemeshv1alpha2 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/servicemesh/v1alpha2"
 	fakeservicemeshv1alpha2 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/servicemesh/v1alpha2/fake"
 	storagev1alpha1 "kubesphere.io/kubesphere/pkg/client/clientset/versioned/typed/storage/v1alpha1"
@@ -96,6 +102,11 @@ func (c *Clientset) Tracker() testing.ObjectTracker {
 
 var _ clientset.Interface = &Clientset{}
 
+// ApplicationV1alpha1 retrieves the ApplicationV1alpha1Client
+func (c *Clientset) ApplicationV1alpha1() applicationv1alpha1.ApplicationV1alpha1Interface {
+	return &fakeapplicationv1alpha1.FakeApplicationV1alpha1{Fake: &c.Fake}
+}
+
 // AuditingV1alpha1 retrieves the AuditingV1alpha1Client
 func (c *Clientset) AuditingV1alpha1() auditingv1alpha1.AuditingV1alpha1Interface {
 	return &fakeauditingv1alpha1.FakeAuditingV1alpha1{Fake: &c.Fake}
@@ -124,6 +135,16 @@ func (c *Clientset) IamV1alpha2() iamv1alpha2.IamV1alpha2Interface {
 // NetworkV1alpha1 retrieves the NetworkV1alpha1Client
 func (c *Clientset) NetworkV1alpha1() networkv1alpha1.NetworkV1alpha1Interface {
 	return &fakenetworkv1alpha1.FakeNetworkV1alpha1{Fake: &c.Fake}
+}
+
+// NotificationV2beta1 retrieves the NotificationV2beta1Client
+func (c *Clientset) NotificationV2beta1() notificationv2beta1.NotificationV2beta1Interface {
+	return &fakenotificationv2beta1.FakeNotificationV2beta1{Fake: &c.Fake}
+}
+
+// QuotaV1alpha2 retrieves the QuotaV1alpha2Client
+func (c *Clientset) QuotaV1alpha2() quotav1alpha2.QuotaV1alpha2Interface {
+	return &fakequotav1alpha2.FakeQuotaV1alpha2{Fake: &c.Fake}
 }
 
 // ServicemeshV1alpha2 retrieves the ServicemeshV1alpha2Client

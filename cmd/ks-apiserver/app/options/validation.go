@@ -31,9 +31,11 @@ func (s *ServerRunOptions) Validate() []error {
 	errors = append(errors, s.OpenPitrixOptions.Validate()...)
 	errors = append(errors, s.NetworkOptions.Validate()...)
 	errors = append(errors, s.LoggingOptions.Validate()...)
+	errors = append(errors, s.AuthenticationOptions.Validate()...)
 	errors = append(errors, s.AuthorizationOptions.Validate()...)
 	errors = append(errors, s.EventsOptions.Validate()...)
 	errors = append(errors, s.AuditingOptions.Validate()...)
+	errors = append(errors, s.AlertingOptions.Validate()...)
 
 	return errors
 }

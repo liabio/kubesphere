@@ -46,9 +46,16 @@ KubeSphere Roadmap demonstrates a list of open source product development plans 
 - [x] Interactive creation pipeline. [#1283](https://github.com/kubesphere/console/issues/1283)
 - [x] Add S2I webhook support. [#6](https://github.com/kubesphere/s2ioperator/issues/6)
 
+### microservice
+
+- [x] Support graph traffic direction. It will show outbound/inbound traffic direction in composed application traffic graph. [#3153](https://github.com/kubesphere/kubesphere/issues/3153)
+- [x] Support Kiali addon. Users can manage istio by kiali directly. [#3106](https://github.com/kubesphere/kubesphere/issues/3106)
+- [x] Support Nginx Ingress Gateway monitor. Add prometheus metrics for nginx ingress controller. [#1205](https://github.com/kubesphere/ks-installer/pull/1205)
+- [x] Support add router component. [#1426](https://github.com/kubesphere/console/issues/1426) 
+
 ### KubeEdge Integration [#3070](https://github.com/kubesphere/kubesphere/issues/3070)
 
-- [ ] KubeEdge cloud components setup.
+- [x] KubeEdge cloud components setup.
 - [ ] KubeEdge edge nodes setup.
 - [x] Edge nodes logging and metrics support.
 - [x] Automatic network configuration on edge node joining/leaving.
@@ -64,14 +71,14 @@ KubeSphere Roadmap demonstrates a list of open source product development plans 
 
 - [x] Configure ServiceMonitor via UI. [#1031](https://github.com/kubesphere/console/pull/1301) 
 - [x] PromQL auto-completion and syntax highlighting. [#1307](https://github.com/kubesphere/console/pull/1307)
-- [ ] Support cluster-level custom monitoring. [#3193](https://github.com/kubesphere/kubesphere/pull/3193)
-- [ ] Import dashboards from Grafana templates.
+- [x] Support cluster-level custom monitoring. [#3193](https://github.com/kubesphere/kubesphere/pull/3193)
+- [x] Tools to convert Grafana dashboard to KubeSphere Dashboard [#9](https://github.com/kubesphere/monitoring-dashboard/pull/9)
 
 #### Custom Alerting [#3065](https://github.com/kubesphere/kubesphere/issues/3065)
 
-- [ ] Prometheus alert rule management. [#3181](https://github.com/kubesphere/kubesphere/pull/3181)
-- [ ] Alert rule tenant control: global/namespace level alert rules. [#3181](https://github.com/kubesphere/kubesphere/pull/3181)
-- [ ] List alerts for a specific alert rule. [#3181](https://github.com/kubesphere/kubesphere/pull/3181)
+- [x] Prometheus alert rule management. [#3181](https://github.com/kubesphere/kubesphere/pull/3181)
+- [x] Alert rule tenant control: global/namespace level alert rules. [#3181](https://github.com/kubesphere/kubesphere/pull/3181)
+- [x] List alerts for a specific alert rule. [#3181](https://github.com/kubesphere/kubesphere/pull/3181)
 
 #### Multi-tenant Notification support including Email/DingTalk/Slack/Wechat works/Webhook [#3066](https://github.com/kubesphere/kubesphere/issues/3066)
 
@@ -84,10 +91,34 @@ KubeSphere Roadmap demonstrates a list of open source product development plans 
 - [x] Support output logs to Loki. [#39](https://github.com/kubesphere/fluentbit-operator/pull/39)
 - [ ] Support containerd log format
 
+### Application Lifecycle Management (OpenPitrix)
+
+- [ ] Refactoring OpenPitrix with CRD, while fix bugs caused by legacy architecture [#3036](https://github.com/kubesphere/kubesphere/issues/3036) [#3001](https://github.com/kubesphere/kubesphere/issues/3001) [#2995](https://github.com/kubesphere/kubesphere/issues/2995) [#2981](https://github.com/kubesphere/kubesphere/issues/2981) [#2954](https://github.com/kubesphere/kubesphere/issues/2954) [#2951](https://github.com/kubesphere/kubesphere/issues/2951) [#2783](https://github.com/kubesphere/kubesphere/issues/2783) [#2713](https://github.com/kubesphere/kubesphere/issues/2713) [#2700](https://github.com/kubesphere/kubesphere/issues/2700) [#1903](https://github.com/kubesphere/kubesphere/issues/1903) 
+
+### Network
+
+- [x] IPPool for Calico and VMs [#3057](https://github.com/kubesphere/kubesphere/issues/3057)
+- [x] Support for deployment using static IPs [#3058](https://github.com/kubesphere/kubesphere/issues/3058)
+- [x] Support network visualization [#3061](https://github.com/kubesphere/kubesphere/issues/3061) [#583](https://github.com/kubesphere/kubesphere/issues/583)
+
+### Metering
+
+- [ ] Support for viewing resource consumption at the cluster, workspace, and application template levels [#3062](https://github.com/kubesphere/kubesphere/issues/3062)
+
+### MultiCluster:
+
+- [x] Validate member cluster configuration if the member cluster config(e.g. jwtSecret) is not same as host cluster, which can reduce the complexity of joining clusters. [#3232](https://github.com/kubesphere/kubesphere/issues/3232)
+- [x] Support configuring cluster controller resync period, some users need to update the cluster component more quickly. [#3213](https://github.com/kubesphere/kubesphere/issues/3213)
+- [x] Lightweight member cluster installation, support running kubepshere without redis and ldap and so on. [#3056](https://github.com/kubesphere/kubesphere/issues/3056)
+- [x] Refactor cluster controller(it should updates the cluster.staus field instead of the tower server when using proxy connection).  [#3234](https://github.com/kubesphere/kubesphere/issues/3234)
+- [ ] Support the tower server and agent running highly available(server with leader election option and running more than one agent). [#31](https://github.com/kubesphere/tower/issues/31)
+
 ## **Upgrade:**
 
-- [ ] Upgrade isito version from 1.4.8 => 1.6.5[#3326](https://github.com/kubesphere/kubesphere/issues/3236)
+- [x] Upgrade isito version from 1.4.8 => 1.6.10[#3326](https://github.com/kubesphere/kubesphere/issues/3236)
+- [x] Upgrade prometheus client_golang to v1.5.1, upgrade prometheus to v1.8.2 [3097](https://github.com/kubesphere/kubesphere/pull/3097)
 - [x] Upgrade Kubectl version for the Toolbox, and the Kubectl Verion will be matched with the Kubernetes Server version. [#3103](https://github.com/kubesphere/kubesphere/issues/3103)
+- [x] Upgrade dependencies of K8s version from v1.17 to V1.18. [#3274](https://github.com/kubesphere/kubesphere/issues/3274)
 
 ### DevOps:
 
@@ -96,8 +127,10 @@ KubeSphere Roadmap demonstrates a list of open source product development plans 
 - [x] Using human-readable error message for pipeline cron text , [#2919](https://github.com/kubesphere/kubesphere/issues/2919)
 - [ ] Using human-readable error message for S2I, [#140](https://github.com/kubesphere/s2ioperator/issues/140)
 
+- [ ] https://github.com/kubesphere/tower/issues/31)
 ### Observability
 
+- [ ] Upgrade to Prometheus v2.25.0
 - [x] Upgrade Notification Manager to v0.7.0+ [Releases](https://github.com/kubesphere/notification-manager/releases)
 - [x] Upgrade FluentBit Operator to v0.3.0+ [Releases](https://github.com/kubesphere/fluentbit-operator/releases)
 - [ ] Upgrade FluentBit to v1.6.9+
@@ -111,7 +144,14 @@ KubeSphere Roadmap demonstrates a list of open source product development plans 
 - [x] Fix the security risk caused by pod viewer can connect to the container terminal. [#3041](https://github.com/kubesphere/kubesphere/issues/3041)
 - [ ] Fix some resources cannot be deleted in cascade. [#2912](https://github.com/kubesphere/kubesphere/issues/2912)
 - [x] Fix self-signed certificate for admission webhook relies on legacy Common Name field. [#2928](https://github.com/kubesphere/kubesphere/issues/2928)
+- [x] Fix application monitor view [#1394](https://github.com/kubesphere/console/issues/1394)
+- [x] Fix Grayscale Release when service app label is not the same with the servicename [#3128](https://github.com/kubesphere/kubesphere/issues/3128)
+- [x] Fix application status which is always updating [#3241](https://github.com/kubesphere/kubesphere/issues/3241)
 - [x] Fix workspaces on member cluster would be deleted when joining to host if there are workspaces with same name on the host. [#3169](https://github.com/kubesphere/kubesphere/issues/3169)
+- [x] Fix cluster unjoin federation plane when using proxy connection. [#3202](https://github.com/kubesphere/kubesphere/pull/3203)
+- [x] Fix multi-cluster-status-condition. [#3135](https://github.com/kubesphere/kubesphere/issues/3135)
+- [x] Fix edge cluster can't join to the host cluster. [#3198](https://github.com/kubesphere/kubesphere/issues/3198)
+- [x] Fix can not rollout restart tower agent. [#29](https://github.com/kubesphere/tower/issues/29)
 
 ### DevOps:
 

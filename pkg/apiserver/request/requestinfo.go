@@ -22,20 +22,20 @@ package request
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
+
 	"k8s.io/apimachinery/pkg/api/validation/path"
 	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metainternalversionscheme "k8s.io/apimachinery/pkg/apis/meta/internalversion/scheme"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
+	k8srequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/klog"
 	"kubesphere.io/kubesphere/pkg/api"
 	"kubesphere.io/kubesphere/pkg/constants"
 	netutils "kubesphere.io/kubesphere/pkg/utils/net"
-	"net/http"
-	"strings"
-
-	k8srequest "k8s.io/apiserver/pkg/endpoints/request"
 )
 
 type RequestInfoResolver interface {
@@ -131,7 +131,15 @@ func (r *RequestInfoFactory) NewRequestInfo(req *http.Request) (*RequestInfo, er
 	}
 
 	defer func() {
-		if kubernetesAPIPrefixes.Has(requestInfo.APIPrefix) {
+		prefix := requestInfo.APIPrefix
+		if prefix == "" {
+			currentParts := splitPath(requestInfo.Path)
+			//Proxy discovery API
+			if len(currentParts) > 0 && len(currentParts) < 3 {
+				prefix = currentParts[0]
+			}
+		}
+		if kubernetesAPIPrefixes.Has(prefix) {
 			requestInfo.IsKubernetesRequest = true
 		}
 	}()

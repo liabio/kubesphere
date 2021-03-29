@@ -37,6 +37,7 @@ import (
 	"kubesphere.io/kubesphere/pkg/controller/network/ippool"
 	"kubesphere.io/kubesphere/pkg/controller/network/nsnetworkpolicy"
 	"kubesphere.io/kubesphere/pkg/controller/network/nsnetworkpolicy/provider"
+	"kubesphere.io/kubesphere/pkg/controller/notification"
 	"kubesphere.io/kubesphere/pkg/controller/pipeline"
 	"kubesphere.io/kubesphere/pkg/controller/s2ibinary"
 	"kubesphere.io/kubesphere/pkg/controller/s2irun"
@@ -48,9 +49,9 @@ import (
 	"kubesphere.io/kubesphere/pkg/simple/client/devops"
 	"kubesphere.io/kubesphere/pkg/simple/client/k8s"
 	ldapclient "kubesphere.io/kubesphere/pkg/simple/client/ldap"
+	"kubesphere.io/kubesphere/pkg/simple/client/multicluster"
 	"kubesphere.io/kubesphere/pkg/simple/client/network"
 	ippoolclient "kubesphere.io/kubesphere/pkg/simple/client/network/ippool"
-	"kubesphere.io/kubesphere/pkg/simple/client/openpitrix"
 	"kubesphere.io/kubesphere/pkg/simple/client/s3"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/kubefed/pkg/controller/util"
@@ -65,8 +66,7 @@ func addControllers(
 	ldapClient ldapclient.Interface,
 	options *k8s.KubernetesOptions,
 	authenticationOptions *authoptions.AuthenticationOptions,
-	openpitrixClient openpitrix.Client,
-	multiClusterEnabled bool,
+	multiClusterOptions *multicluster.Options,
 	networkOptions *network.Options,
 	serviceMeshEnabled bool,
 	kubectlImage string,
@@ -75,6 +75,8 @@ func addControllers(
 	kubernetesInformer := informerFactory.KubernetesSharedInformerFactory()
 	istioInformer := informerFactory.IstioSharedInformerFactory()
 	kubesphereInformer := informerFactory.KubeSphereSharedInformerFactory()
+
+	multiClusterEnabled := multiClusterOptions.Enable
 
 	var vsController, drController manager.Runnable
 	if serviceMeshEnabled {
@@ -191,7 +193,8 @@ func addControllers(
 		client.KubeSphere(),
 		kubesphereInformer.Iam().V1alpha2().LoginRecords(),
 		kubesphereInformer.Iam().V1alpha2().Users(),
-		authenticationOptions.LoginHistoryRetentionPeriod)
+		authenticationOptions.LoginHistoryRetentionPeriod,
+		authenticationOptions.LoginHistoryMaximumEntries)
 
 	csrController := certificatesigningrequest.NewController(client.Kubernetes(),
 		kubernetesInformer.Certificates().V1beta1().CertificateSigningRequests(),
@@ -229,7 +232,7 @@ func addControllers(
 			client.Config(),
 			kubesphereInformer.Cluster().V1alpha1().Clusters(),
 			client.KubeSphere().ClusterV1alpha1().Clusters(),
-			openpitrixClient)
+			multiClusterOptions.ClusterControllerResyncSecond)
 	}
 
 	var nsnpController manager.Runnable
@@ -249,13 +252,9 @@ func addControllers(
 	}
 
 	var ippoolController manager.Runnable
-	ippoolProvider := ippoolclient.NewProvider(kubernetesInformer.Core().V1().Pods(), client.KubeSphere(), client.Kubernetes(), networkOptions.IPPoolType, options)
+	ippoolProvider := ippoolclient.NewProvider(kubernetesInformer, client.KubeSphere(), client.Kubernetes(), networkOptions.IPPoolType, options)
 	if ippoolProvider != nil {
-		ippoolController = ippool.NewIPPoolController(kubesphereInformer.Network().V1alpha1().IPPools(),
-			kubesphereInformer.Network().V1alpha1().IPAMBlocks(),
-			client.Kubernetes(),
-			client.KubeSphere(),
-			ippoolProvider)
+		ippoolController = ippool.NewIPPoolController(kubesphereInformer, kubernetesInformer, client.Kubernetes(), client.KubeSphere(), ippoolProvider)
 	}
 
 	controllers := map[string]manager.Runnable{
@@ -286,6 +285,11 @@ func addControllers(
 
 	if multiClusterEnabled {
 		controllers["globalrole-controller"] = globalRoleController
+		notificationController, err := notification.NewController(client.Kubernetes(), mgr.GetClient(), mgr.GetCache())
+		if err != nil {
+			return err
+		}
+		controllers["notification-controller"] = notificationController
 	}
 
 	for name, ctrl := range controllers {

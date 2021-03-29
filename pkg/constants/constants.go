@@ -32,14 +32,19 @@ const (
 	AdminUserName                 = "admin"
 	IngressControllerPrefix       = "kubesphere-router-"
 
-	WorkspaceLabelKey        = "kubesphere.io/workspace"
-	NamespaceLabelKey        = "kubesphere.io/namespace"
-	DisplayNameAnnotationKey = "kubesphere.io/alias-name"
-	DescriptionAnnotationKey = "kubesphere.io/description"
-	CreatorAnnotationKey     = "kubesphere.io/creator"
-	UsernameLabelKey         = "kubesphere.io/username"
-	DevOpsProjectLabelKey    = "kubesphere.io/devopsproject"
-	KubefedManagedLabel      = "kubefed.io/managed"
+	ClusterNameLabelKey               = "kubesphere.io/cluster"
+	NameLabelKey                      = "kubesphere.io/name"
+	WorkspaceLabelKey                 = "kubesphere.io/workspace"
+	NamespaceLabelKey                 = "kubesphere.io/namespace"
+	DisplayNameAnnotationKey          = "kubesphere.io/alias-name"
+	ChartRepoIdLabelKey               = "application.kubesphere.io/repo-id"
+	ChartApplicationIdLabelKey        = "application.kubesphere.io/app-id"
+	ChartApplicationVersionIdLabelKey = "application.kubesphere.io/app-version-id"
+	CategoryIdLabelKey                = "application.kubesphere.io/app-category-id"
+	CreatorAnnotationKey              = "kubesphere.io/creator"
+	UsernameLabelKey                  = "kubesphere.io/username"
+	DevOpsProjectLabelKey             = "kubesphere.io/devopsproject"
+	KubefedManagedLabel               = "kubefed.io/managed"
 
 	UserNameHeader = "X-Token-Username"
 
@@ -58,6 +63,7 @@ const (
 	DevOpsProjectRoleTag = "DevOps Project Role"
 	NamespaceRoleTag     = "Namespace Role"
 
+	OpenpitrixTag            = "OpenPitrix Resources"
 	OpenpitrixAppInstanceTag = "App Instance"
 	OpenpitrixAppTemplateTag = "App Template"
 	OpenpitrixCategoryTag    = "Category"
@@ -104,6 +110,25 @@ const (
 	LogQueryTag      = "Log Query"
 	EventsQueryTag   = "Events Query"
 	AuditingQueryTag = "Auditing Query"
+
+	ClusterMetersTag   = "Cluster Meters"
+	NodeMetersTag      = "Node Meters"
+	WorkspaceMetersTag = "Workspace Meters"
+	NamespaceMetersTag = "Namespace Meters"
+	WorkloadMetersTag  = "Workload Meters"
+	PodMetersTag       = "Pod Meters"
+	ServiceMetricsTag  = "ServiceName Meters"
+
+	ApplicationReleaseName = "meta.helm.sh/release-name"
+	ApplicationReleaseNS   = "meta.helm.sh/release-namespace"
+
+	ApplicationName    = "app.kubernetes.io/name"
+	ApplicationVersion = "app.kubernetes.io/version"
+	AlertingTag        = "Alerting"
+
+	NotificationTag             = "Notification"
+	NotificationSecretNamespace = "kubesphere-monitoring-federated"
+	NotificationManagedLabel    = "notification.kubesphere.io/managed"
 )
 
 var (
